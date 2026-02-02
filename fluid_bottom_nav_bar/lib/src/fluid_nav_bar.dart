@@ -1,13 +1,42 @@
 import 'package:fluid_bottom_nav_bar/src/fluid_nav_bar_icon.dart';
 import 'package:fluid_bottom_nav_bar/src/fluid_nav_bar_style.dart';
 import 'package:flutter/material.dart';
-
 import './curves.dart';
 import './fluid_nav_bar_item.dart';
 
 typedef void FluidNavBarChangeCallback(int selectedIndex);
 
-typedef Widget FluidNavBarItemBuilder(FluidNavBarIcon icon, FluidNavBarItem item);
+typedef Widget FluidNavBarItemBuilder(
+  FluidNavBarIcon icon,
+  FluidNavBarItem item,
+);
+
+/// Controller to drive the FluidNavBar from outside the widget tree.
+///
+/// Usage:
+///   final controller = FluidNavBarController(initialIndex: 0);
+///   FluidNavBar(..., controller: controller);
+///
+/// To change the index (and trigger the fluid animation), do:
+///   controller.index = 2;
+class FluidNavBarController extends ChangeNotifier {
+  FluidNavBarController({int initialIndex = 0}) : _index = initialIndex;
+
+  int _index;
+
+  /// Current index of the nav bar
+  int get index => _index;
+
+  /// Change the index — this will notify listeners (the FluidNavBar) so it can animate.
+  set index(int newIndex) {
+    if (_index == newIndex) return;
+    _index = newIndex;
+    notifyListeners();
+  }
+
+  /// Convenience method
+  void setIndex(int newIndex) => index = newIndex;
+}
 
 /// A widget to display a fluid navigation bar with icon buttons.
 ///
@@ -58,30 +87,38 @@ class FluidNavBar extends StatefulWidget {
 
   final FluidNavBarItemBuilder itemBuilder;
 
-  FluidNavBar(
-      {Key? key,
-      required this.icons,
-      this.onChange,
-      this.style,
-      this.animationFactor = 1.0,
-      this.scaleFactor = 1.2,
-      this.defaultIndex = 0,
-      FluidNavBarItemBuilder? itemBuilder})
-      : this.itemBuilder = itemBuilder ?? _identityBuilder,
-        assert(icons.length > 1),
-        super(key: key);
+  /// Optional external controller to programmatically change the index.
+  final FluidNavBarController? controller;
+
+  FluidNavBar({
+    super.key,
+    required this.icons,
+    this.onChange,
+    this.style,
+    this.animationFactor = 1.0,
+    this.scaleFactor = 1.2,
+    this.defaultIndex = 0,
+    FluidNavBarItemBuilder? itemBuilder,
+    this.controller,
+  }) : this.itemBuilder = itemBuilder ?? _identityBuilder,
+       assert(icons.length > 1);
 
   @override
   State createState() => _FluidNavBarState();
 
-  static Widget _identityBuilder(FluidNavBarIcon icon, FluidNavBarItem item) => item;
+  static Widget _identityBuilder(FluidNavBarIcon icon, FluidNavBarItem item) =>
+      item;
 }
 
-class _FluidNavBarState extends State<FluidNavBar> with TickerProviderStateMixin {
+class _FluidNavBarState extends State<FluidNavBar>
+    with TickerProviderStateMixin {
   int _currentIndex = 0;
 
   late final AnimationController _xController;
   late final AnimationController _yController;
+
+  // A listener registered on the external controller (if any)
+  VoidCallback? _controllerListener;
 
   @override
   void initState() {
@@ -89,24 +126,78 @@ class _FluidNavBarState extends State<FluidNavBar> with TickerProviderStateMixin
 
     _currentIndex = widget.defaultIndex;
 
-    _xController = AnimationController(vsync: this, animationBehavior: AnimationBehavior.preserve);
-    _yController = AnimationController(vsync: this, animationBehavior: AnimationBehavior.preserve);
+    _xController = AnimationController(
+      vsync: this,
+      animationBehavior: AnimationBehavior.preserve,
+    );
+    _yController = AnimationController(
+      vsync: this,
+      animationBehavior: AnimationBehavior.preserve,
+    );
 
-    Listenable.merge([_xController, _yController]).addListener(() {
-      setState(() {});
-    });
+    Listenable.merge([
+      _xController,
+      _yController,
+    ]).addListener(() => setState(() {}));
+
+    // If a controller is provided, listen to it so external changes animate the bar
+    if (widget.controller != null) {
+      _controllerListener = () {
+        final idx = widget.controller!.index;
+        if (idx != _currentIndex) {
+          // Delegate to same handler as taps so animation is identical
+          _handleTap(idx);
+        }
+      };
+      widget.controller!.addListener(_controllerListener!);
+    }
   }
 
   @override
   void didChangeDependencies() {
-    _xController.value = _indexToPosition(_currentIndex) / MediaQuery.of(context).size.width;
+    _xController.value =
+        _indexToPosition(_currentIndex) / MediaQuery.of(context).size.width;
     _yController.value = 1.0;
 
     super.didChangeDependencies();
   }
 
   @override
+  void didUpdateWidget(covariant FluidNavBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // If controller instance changed, remove listener from old and add to new
+    if (oldWidget.controller != widget.controller) {
+      if (oldWidget.controller != null && _controllerListener != null) {
+        oldWidget.controller!.removeListener(_controllerListener!);
+      }
+
+      if (widget.controller != null) {
+        _controllerListener = () {
+          final idx = widget.controller!.index;
+          if (idx != _currentIndex) {
+            _handleTap(idx);
+          }
+        };
+        widget.controller!.addListener(_controllerListener!);
+
+        // If the new controller has a different index, animate to it
+        if (widget.controller!.index != _currentIndex) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _handleTap(widget.controller!.index);
+          });
+        }
+      } else {
+        _controllerListener = null;
+      }
+    }
+  }
+
+  @override
   void dispose() {
+    if (widget.controller != null && _controllerListener != null) {
+      widget.controller!.removeListener(_controllerListener!);
+    }
     _xController.dispose();
     _yController.dispose();
     super.dispose();
@@ -134,51 +225,54 @@ class _FluidNavBarState extends State<FluidNavBar> with TickerProviderStateMixin
             top: 0,
             width: _getButtonContainerWidth(),
             height: height,
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: _buildButtons()),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: _buildButtons(),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBackground() {
-    return CustomPaint(
-      painter: _BackgroundCurvePainter(
-        _xController.value * MediaQuery.of(context).size.width,
-        Tween<double>(
-          begin: Curves.easeInExpo.transform(_yController.value),
-          end: ElasticOutCurve(0.38).transform(_yController.value),
-        ).transform(_yController.velocity.sign * 0.5 + 0.5),
-        widget.style?.barBackgroundColor ?? Colors.white,
-      ),
-    );
-  }
+  Widget _buildBackground() => CustomPaint(
+    painter: _BackgroundCurvePainter(
+      _xController.value * MediaQuery.of(context).size.width,
+      Tween<double>(
+        begin: Curves.easeInExpo.transform(_yController.value),
+        end: ElasticOutCurve(0.38).transform(_yController.value),
+      ).transform(_yController.velocity.sign * 0.5 + 0.5),
+      widget.style?.barBackgroundColor ?? Colors.white,
+    ),
+  );
 
-  List<Widget> _buildButtons() {
-    return widget.icons
-        .asMap()
-        .entries
-        .map(
-          (entry) => widget.itemBuilder(
-            entry.value,
-            FluidNavBarItem(
-              entry.value.svgPath ?? entry.value.svgPath,
-              entry.value.icon,
-              _currentIndex == entry.key,
-              () => _handleTap(entry.key),
-              entry.value.selectedForegroundColor ?? widget.style?.iconSelectedForegroundColor ?? Colors.black,
-              entry.value.unselectedForegroundColor ?? widget.style?.iconUnselectedForegroundColor ?? Colors.grey,
-              entry.value.backgroundColor ??
-                  widget.style?.iconBackgroundColor ??
-                  widget.style?.barBackgroundColor ??
-                  Colors.white,
-              widget.scaleFactor,
-              widget.animationFactor,
-            ),
+  List<Widget> _buildButtons() => widget.icons
+      .asMap()
+      .entries
+      .map(
+        (entry) => widget.itemBuilder(
+          entry.value,
+          FluidNavBarItem(
+            entry.value.svgPath ?? entry.value.svgPath,
+            entry.value.icon,
+            _currentIndex == entry.key,
+            () => _handleTap(entry.key),
+            entry.value.selectedForegroundColor ??
+                widget.style?.iconSelectedForegroundColor ??
+                Colors.black,
+            entry.value.unselectedForegroundColor ??
+                widget.style?.iconUnselectedForegroundColor ??
+                Colors.grey,
+            entry.value.backgroundColor ??
+                widget.style?.iconBackgroundColor ??
+                widget.style?.barBackgroundColor ??
+                Colors.white,
+            widget.scaleFactor,
+            widget.animationFactor,
           ),
-        )
-        .toList();
-  }
+        ),
+      )
+      .toList();
 
   double _getButtonContainerWidth() {
     double width = MediaQuery.of(context).size.width;
@@ -195,26 +289,31 @@ class _FluidNavBarState extends State<FluidNavBar> with TickerProviderStateMixin
     final appWidth = MediaQuery.of(context).size.width;
     final buttonsWidth = _getButtonContainerWidth();
     final startX = (appWidth - buttonsWidth) / 2;
-    return startX + index.toDouble() * buttonsWidth / buttonCount + buttonsWidth / (buttonCount * 2.0);
+    return startX +
+        index.toDouble() * buttonsWidth / buttonCount +
+        buttonsWidth / (buttonCount * 2.0);
   }
 
   void _handleTap(int index) {
     if (_currentIndex == index || _xController.isAnimating) return;
 
-    setState(() {
-      _currentIndex = index;
-    });
+    setState(() => _currentIndex = index);
 
     _yController.value = 1.0;
-    _xController.animateTo(_indexToPosition(index) / MediaQuery.of(context).size.width,
-        duration: Duration(milliseconds: 620) * widget.animationFactor);
-    Future.delayed(
-      Duration(milliseconds: 500) * widget.animationFactor,
-      () {
-        _yController.animateTo(1.0, duration: Duration(milliseconds: 1200) * widget.animationFactor);
-      },
+    _xController.animateTo(
+      _indexToPosition(index) / MediaQuery.of(context).size.width,
+      duration: Duration(milliseconds: 620) * widget.animationFactor,
     );
-    _yController.animateTo(0.0, duration: Duration(milliseconds: 300) * widget.animationFactor);
+    Future.delayed(Duration(milliseconds: 500) * widget.animationFactor, () {
+      _yController.animateTo(
+        1.0,
+        duration: Duration(milliseconds: 1200) * widget.animationFactor,
+      );
+    });
+    _yController.animateTo(
+      0.0,
+      duration: Duration(milliseconds: 300) * widget.animationFactor,
+    );
 
     if (widget.onChange != null) {
       widget.onChange!(index);
@@ -242,35 +341,60 @@ class _BackgroundCurvePainter extends CustomPainter {
   final Color _color;
 
   _BackgroundCurvePainter(double x, double normalizedY, Color color)
-      : _x = x,
-        _normalizedY = normalizedY,
-        _color = color;
+    : _x = x,
+      _normalizedY = normalizedY,
+      _color = color;
 
   @override
   void paint(canvas, size) {
     // Paint two cubic bezier curves using various linear interpolations based off of the `_normalizedY` value
     final norm = LinearPointCurve(0.5, 2.0).transform(_normalizedY) / 2;
 
-    final radius = Tween<double>(begin: _radiusTop, end: _radiusBottom).transform(norm);
+    final radius = Tween<double>(
+      begin: _radiusTop,
+      end: _radiusBottom,
+    ).transform(norm);
     // Point colinear to the top edge of the background pane
-    final anchorControlOffset =
-        Tween<double>(begin: radius * _horizontalControlTop, end: radius * _horizontalControlBottom)
-            .transform(LinearPointCurve(0.5, 0.75).transform(norm));
+    final anchorControlOffset = Tween<double>(
+      begin: radius * _horizontalControlTop,
+      end: radius * _horizontalControlBottom,
+    ).transform(LinearPointCurve(0.5, 0.75).transform(norm));
     // Point that slides up and down depending on distance for the target x position
-    final dipControlOffset = Tween<double>(begin: radius * _pointControlTop, end: radius * _pointControlBottom)
-        .transform(LinearPointCurve(0.5, 0.8).transform(norm));
-    final y = Tween<double>(begin: _topY, end: _bottomY).transform(LinearPointCurve(0.2, 0.7).transform(norm));
-    final dist =
-        Tween<double>(begin: _topDistance, end: _bottomDistance).transform(LinearPointCurve(0.5, 0.0).transform(norm));
+    final dipControlOffset = Tween<double>(
+      begin: radius * _pointControlTop,
+      end: radius * _pointControlBottom,
+    ).transform(LinearPointCurve(0.5, 0.8).transform(norm));
+    final y = Tween<double>(
+      begin: _topY,
+      end: _bottomY,
+    ).transform(LinearPointCurve(0.2, 0.7).transform(norm));
+    final dist = Tween<double>(
+      begin: _topDistance,
+      end: _bottomDistance,
+    ).transform(LinearPointCurve(0.5, 0.0).transform(norm));
     final x0 = _x - dist / 2;
     final x1 = _x + dist / 2;
 
     final path = Path()
       ..moveTo(0, 0)
       ..lineTo(x0 - radius, 0)
-      ..cubicTo(x0 - radius + anchorControlOffset, 0, x0 - dipControlOffset, y, x0, y)
+      ..cubicTo(
+        x0 - radius + anchorControlOffset,
+        0,
+        x0 - dipControlOffset,
+        y,
+        x0,
+        y,
+      )
       ..lineTo(x1, y)
-      ..cubicTo(x1 + dipControlOffset, y, x1 + radius - anchorControlOffset, 0, x1 + radius, 0)
+      ..cubicTo(
+        x1 + dipControlOffset,
+        y,
+        x1 + radius - anchorControlOffset,
+        0,
+        x1 + radius,
+        0,
+      )
       ..lineTo(size.width, 0)
       ..lineTo(size.width, size.height)
       ..lineTo(0, size.height);
@@ -281,7 +405,8 @@ class _BackgroundCurvePainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BackgroundCurvePainter oldPainter) {
-    return _x != oldPainter._x || _normalizedY != oldPainter._normalizedY || _color != oldPainter._color;
-  }
+  bool shouldRepaint(_BackgroundCurvePainter oldPainter) =>
+      _x != oldPainter._x ||
+      _normalizedY != oldPainter._normalizedY ||
+      _color != oldPainter._color;
 }
