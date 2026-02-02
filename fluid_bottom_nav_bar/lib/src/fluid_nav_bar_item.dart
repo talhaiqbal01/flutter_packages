@@ -1,6 +1,4 @@
 import 'package:fluid_bottom_nav_bar/fluid_bottom_nav_bar.dart';
-import 'package:fluid_bottom_nav_bar/src/fluid_nav_bar_icon.dart';
-import 'package:flutter/animation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_svg/svg.dart';
 import 'curves.dart';
@@ -57,16 +55,18 @@ class FluidNavBarItem extends StatefulWidget {
     this.backgroundColor,
     this.scaleFactor,
     this.animationFactor,
-  )   : assert(scaleFactor >= 1.0),
-        assert(svgPath == null || icon == null,
-            'Cannot provide both an iconPath and an icon.'),
-        assert(!(svgPath == null && icon == null),
-            'An iconPath or an icon must be provided.');
+  ) : assert(scaleFactor >= 1.0),
+      assert(
+        svgPath == null || icon == null,
+        'Cannot provide both an iconPath and an icon.',
+      ),
+      assert(
+        !(svgPath == null && icon == null),
+        'An iconPath or an icon must be provided.',
+      );
 
   @override
-  State createState() {
-    return _FluidNavBarItemState(selected);
-  }
+  State createState() => _FluidNavBarItemState(selected);
 }
 
 class _FluidNavBarItemState extends State<FluidNavBarItem>
@@ -92,41 +92,46 @@ class _FluidNavBarItemState extends State<FluidNavBarItem>
     double waveRatio = 0.28;
     _animationController = AnimationController(
       duration: Duration(milliseconds: (1600 * widget.animationFactor).toInt()),
-      reverseDuration:
-          Duration(milliseconds: (1000 * widget.animationFactor).toInt()),
+      reverseDuration: Duration(
+        milliseconds: (1000 * widget.animationFactor).toInt(),
+      ),
       vsync: this,
     )..addListener(() => setState(() {}));
 
-    _activeColorClipAnimation =
-        Tween<double>(begin: 0.0, end: _iconSize).animate(CurvedAnimation(
-      parent: _animationController,
-      curve: Interval(0.25, 0.38, curve: Curves.easeOut),
-      reverseCurve: Interval(0.7, 1.0, curve: Curves.easeInCirc),
-    ));
+    _activeColorClipAnimation = Tween<double>(begin: 0.0, end: _iconSize)
+        .animate(
+          CurvedAnimation(
+            parent: _animationController,
+            curve: Interval(0.25, 0.38, curve: Curves.easeOut),
+            reverseCurve: Interval(0.7, 1.0, curve: Curves.easeInCirc),
+          ),
+        );
 
     var _animation = CurvedAnimation(
-        parent: _animationController, curve: LinearPointCurve(waveRatio, 0.0));
+      parent: _animationController,
+      curve: LinearPointCurve(waveRatio, 0.0),
+    );
 
     _yOffsetAnimation = Tween<double>(begin: _defaultOffset, end: _activeOffset)
-        .animate(CurvedAnimation(
-      parent: _animation,
-      curve: ElasticOutCurve(0.38),
-      reverseCurve: Curves.easeInCirc,
-    ));
+        .animate(
+          CurvedAnimation(
+            parent: _animation,
+            curve: ElasticOutCurve(0.38),
+            reverseCurve: Curves.easeInCirc,
+          ),
+        );
 
     var activatingHalfTween = Tween<double>(begin: 1, end: widget.scaleFactor);
     _activatingAnimation = TweenSequence([
       TweenSequenceItem(tween: activatingHalfTween, weight: 50.0),
       TweenSequenceItem(
-          tween: ReverseTween<double>(activatingHalfTween), weight: 50.0),
-    ]).animate(CurvedAnimation(
-      parent: _animation,
-      curve: Interval(0.0, 0.3),
-    ));
-    _inactivatingAnimation = ConstantTween<double>(1.0).animate(CurvedAnimation(
-      parent: _animation,
-      curve: Interval(0.3, 1.0),
-    ));
+        tween: ReverseTween<double>(activatingHalfTween),
+        weight: 50.0,
+      ),
+    ]).animate(CurvedAnimation(parent: _animation, curve: Interval(0.0, 0.3)));
+    _inactivatingAnimation = ConstantTween<double>(
+      1.0,
+    ).animate(CurvedAnimation(parent: _animation, curve: Interval(0.3, 1.0)));
 
     _startAnimation();
   }
@@ -134,9 +139,7 @@ class _FluidNavBarItemState extends State<FluidNavBarItem>
   @override
   void didUpdateWidget(oldWidget) {
     if (oldWidget.selected != _selected) {
-      setState(() {
-        _selected = widget.selected;
-      });
+      setState(() => _selected = widget.selected);
       _startAnimation();
     }
     super.didUpdateWidget(oldWidget);
@@ -152,8 +155,9 @@ class _FluidNavBarItemState extends State<FluidNavBarItem>
   Widget build(context) {
     const ne = FluidNavBarItem.nominalExtent;
 
-    final scaleAnimation =
-        _selected ? _activatingAnimation : _inactivatingAnimation;
+    final scaleAnimation = _selected
+        ? _activatingAnimation
+        : _inactivatingAnimation;
 
     return GestureDetector(
       onTap: widget.onTap,
@@ -169,44 +173,51 @@ class _FluidNavBarItemState extends State<FluidNavBarItem>
             shape: CircleBorder(),
           ),
           transform: Matrix4.translationValues(0, -_yOffsetAnimation.value, 0),
-          child: Stack(children: <Widget>[
-            Container(
-              alignment: Alignment.center,
-              child: widget.icon == null
-                  ? SvgPicture.asset(
-                      widget.svgPath!,
-                      color: widget.unselectedForegroundColor,
-                      width: _iconSize,
-                      height: _iconSize * scaleAnimation.value,
-                      colorBlendMode: BlendMode.srcIn,
-                    )
-                  : Icon(
-                      widget.icon,
-                      color: widget.unselectedForegroundColor,
-                      size: _iconSize * scaleAnimation.value,
-                    ),
-            ),
-            Container(
-              alignment: Alignment.center,
-              child: ClipRect(
-                clipper: _SvgPictureClipper(
-                    _activeColorClipAnimation.value * scaleAnimation.value),
+          child: Stack(
+            children: <Widget>[
+              Container(
+                alignment: Alignment.center,
                 child: widget.icon == null
                     ? SvgPicture.asset(
                         widget.svgPath!,
-                        color: widget.selectedForegroundColor,
+                        colorFilter: ColorFilter.mode(
+                          widget.unselectedForegroundColor,
+                          BlendMode.srcIn,
+                        ),
                         width: _iconSize,
                         height: _iconSize * scaleAnimation.value,
-                        colorBlendMode: BlendMode.srcIn,
                       )
                     : Icon(
                         widget.icon,
-                        color: widget.selectedForegroundColor,
+                        color: widget.unselectedForegroundColor,
                         size: _iconSize * scaleAnimation.value,
                       ),
               ),
-            ),
-          ]),
+              Container(
+                alignment: Alignment.center,
+                child: ClipRect(
+                  clipper: _SvgPictureClipper(
+                    _activeColorClipAnimation.value * scaleAnimation.value,
+                  ),
+                  child: widget.icon == null
+                      ? SvgPicture.asset(
+                          widget.svgPath!,
+                          colorFilter: ColorFilter.mode(
+                            widget.selectedForegroundColor,
+                            BlendMode.srcIn,
+                          ),
+                          width: _iconSize,
+                          height: _iconSize * scaleAnimation.value,
+                        )
+                      : Icon(
+                          widget.icon,
+                          color: widget.selectedForegroundColor,
+                          size: _iconSize * scaleAnimation.value,
+                        ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -230,13 +241,11 @@ class _SvgPictureClipper extends CustomClipper<Rect> {
   _SvgPictureClipper(this.height);
 
   @override
-  Rect getClip(Size size) {
-    return Rect.fromPoints(size.topLeft(Offset.zero),
-        size.topRight(Offset.zero) + Offset(0, height));
-  }
+  Rect getClip(Size size) => Rect.fromPoints(
+    size.topLeft(Offset.zero),
+    size.topRight(Offset.zero) + Offset(0, height),
+  );
 
   @override
-  bool shouldReclip(CustomClipper<Rect> oldClipper) {
-    return true;
-  }
+  bool shouldReclip(CustomClipper<Rect> oldClipper) => true;
 }
